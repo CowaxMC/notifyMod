@@ -1,0 +1,115 @@
+# Notify Mod Configuration with Multi-Language Support
+
+# List of message types (e.g., Donate, Tips, Rules, etc.)
+messageTypes = [
+    "Donate",
+    "Tips",
+    "Rules"
+]
+
+# List of supported language codes (ru, en, de, fr, etc.)
+# Messages will be sent to players based on their client language
+supportedLanguages = [
+    "ru",
+    "en"
+]
+
+# Configuration for each message type
+[messages]
+    # Example 1: Donate messages with Russian and English translations
+    [messages.donate]
+        # Interval in seconds for Donate notifications
+        interval = 300
+        # Whether the message is clickable
+        clickable = true
+        # Click action type: COMMAND or URL
+        clickType = "URL"
+        # Click values (same for all languages)
+        clickValues = [
+            "https://example.com/donate",
+            "https://example.com/donate?tier=premium",
+            "https://example.com/donate?special=true"
+        ]
+        
+        # Russian messages
+        [messages.donate.ru]
+            texts = [
+                "§6[Донат] §eПоддержи сервер! §b§nНажми сюда!",
+                "§6[Донат] §eПомоги нам расти! §b§nЗадонать!",
+                "§6[Донат] §eТвоя поддержка важна! §b§nКликни для доната!"
+            ]
+        
+        # English messages
+        [messages.donate.en]
+            texts = [
+                "§6[Donate] §eSupport our server! §b§nClick here!",
+                "§6[Donate] §eHelp us grow! §b§nDonate now!",
+                "§6[Donate] §eYour support matters! §b§nClick to donate!"
+            ]
+    
+    # Example 2: Tips messages (non-clickable)
+    [messages.tips]
+        # Interval in seconds for Tips notifications
+        interval = 180
+        # Whether the message is clickable
+        clickable = false
+        # Click action type
+        clickType = "COMMAND"
+        # Note: clickValues is not required when clickable = false
+        
+        # Russian tips
+        [messages.tips.ru]
+            texts = [
+                "§a[Совет] §7Используй §e/help §7для списка команд!",
+                "§a[Совет] §7Нажми §eF3 + H §7чтобы видеть ID предметов!",
+                "§a[Совет] §7Используй §e/spawn §7чтобы вернуться на спавн!",
+                "§a[Совет] §7Пиши §e/tpa <игрок> §7для телепортации!",
+                "§a[Совет] §7Используй §e/sethome §7чтобы установить дом!"
+            ]
+        
+        # English tips
+        [messages.tips.en]
+            texts = [
+                "§a[Tip] §7Use §e/help §7to see all available commands!",
+                "§a[Tip] §7Press §eF3 + H §7to see item IDs!",
+                "§a[Tip] §7Use §e/spawn §7to return to spawn!",
+                "§a[Tip] §7Type §e/tpa <player> §7to teleport to a player!",
+                "§a[Tip] §7Use §e/sethome §7to set your home location!"
+            ]
+    
+    # Example 3: Rules messages (clickable with commands)
+    [messages.rules]
+        # Interval in seconds for Rules notifications
+        interval = 600
+        # Whether the message is clickable
+        clickable = true
+        # Click action type: COMMAND or URL
+        clickType = "COMMAND"
+        # Commands (same for all languages)
+        clickValues = [
+            "/rules",
+            "/rules",
+            "/rules"
+        ]
+        
+        # Russian rules
+        [messages.rules.ru]
+            texts = [
+                "§c[Правила] §7Не забывай следовать правилам! §e§nКликни для просмотра",
+                "§c[Правила] §7Будь вежлив с другими игроками! §e§n/rules",
+                "§c[Правила] §7Гриферство запрещено! §e§nНажми сюда"
+            ]
+        
+        # English rules
+        [messages.rules.en]
+            texts = [
+                "§c[Rules] §7Remember to follow server rules! §e§nClick to view",
+                "§c[Rules] §7Be respectful to other players! §e§n/rules",
+                "§c[Rules] §7No griefing allowed! §e§nClick here"
+            ]
+
+# You can add more message types by following the same pattern:
+# 1. Add the type name to messageTypes list
+# 2. Create [messages.yourtype] section with interval, clickable, clickType, clickValues
+# 3. Create [messages.yourtype.ru] and [messages.yourtype.en] sections with texts
+# 4. Add more languages if needed (de, fr, es, etc.)
