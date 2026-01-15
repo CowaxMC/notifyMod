@@ -5,16 +5,14 @@ import com.mojang.brigadier.context.CommandContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TextComponent; // [Важно] Импорт
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.config.ModConfig;
 
 @Mod.EventBusSubscriber(modid = ExampleMod.MODID)
 public class NotifyCommand
 {
-    private static ModConfig modConfig;
-
     @SubscribeEvent
     public static void onServerStarting(ServerStartingEvent event)
     {
@@ -22,7 +20,7 @@ public class NotifyCommand
         
         dispatcher.register(
             Commands.literal("notify")
-                .requires(source -> source.hasPermission(2)) // Требует OP уровень 2
+                .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("reload")
                     .executes(NotifyCommand::reload))
         );
@@ -34,23 +32,23 @@ public class NotifyCommand
         
         try
         {
-            ExampleMod.LOGGER.info("Принудительная перезагрузка конфига через команду /notify reload");
+            ExampleMod.LOGGER.info("Reloading config via command...");
             
-            // Перезагружаем конфиг
             Config.reload();
             
-            // Сбрасываем и переинициализируем планировщик
             MessageScheduler.reset();
             MessageScheduler.initialize();
             
-            source.sendSuccess(() -> Component.literal("§a[Notify] §7Конфигурация перезагружена!"), true);
-            source.sendSuccess(() -> Component.literal("§7Загружено типов сообщений: §e" + Config.messageTypes.size()), false);
+            // [ИСПРАВЛЕНИЕ] Убраны лямбды () -> и заменен Component.literal на new TextComponent
+            source.sendSuccess(new TextComponent("§a[Notify] §7Config reloaded!"), true);
+            source.sendSuccess(new TextComponent("§7Loaded types: §e" + Config.messageTypes.size()), false);
             
             return 1;
         }
         catch (Exception e)
         {
-            source.sendFailure(Component.literal("§c[Notify] §7Ошибка при перезагрузке: " + e.getMessage()));
+            // [ИСПРАВЛЕНИЕ] new TextComponent
+            source.sendFailure(new TextComponent("§c[Notify] §7Error: " + e.getMessage()));
             e.printStackTrace();
             return 0;
         }

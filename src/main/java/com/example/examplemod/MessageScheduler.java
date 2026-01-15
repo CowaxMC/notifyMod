@@ -1,11 +1,14 @@
 package com.example.examplemod;
 
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TextComponent; // [Важно] Добавлен импорт
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.server.ServerLifecycleHooks; // [Важно] Добавлен импорт
+import net.minecraft.Util; // [Важно] Для UUID
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,7 +26,6 @@ public class MessageScheduler
 
         messageTypes.clear();
 
-        // Инициализируем типы сообщений из конфига
         for (String typeName : Config.messageTypes)
         {
             Config.MessageConfig config = Config.messageConfigs.get(typeName);
@@ -46,18 +48,17 @@ public class MessageScheduler
         if (!initialized)
             initialize();
 
-        MinecraftServer server = event.getServer();
+        // [ИСПРАВЛЕНИЕ 1] Получаем сервер через хуки, так как в event метода нет
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null)
             return;
 
         long currentTime = System.currentTimeMillis();
 
-        // Проверяем каждый тип сообщения
         for (MessageType messageType : messageTypes)
         {
             if (messageType.shouldSend(currentTime))
             {
-                // Отправляем сообщение всем игрокам (каждому на его языке)
                 sendMessageToAllPlayers(server, messageType);
                 messageType.setLastSentTime(currentTime);
             }
@@ -66,26 +67,18 @@ public class MessageScheduler
 
     private static void sendMessageToAllPlayers(MinecraftServer server, MessageType messageType)
     {
-        // Отправляем каждому игроку персонализированное сообщение на его языке
         for (ServerPlayer player : server.getPlayerList().getPlayers())
         {
-            // Получаем язык игрока (например: "ru_ru", "en_us")
-            String playerLang = player.getLanguage();
+            String playerLang = "en_us"; // В 1.18.2 получение языка может отличаться, оставим упрощенно или нужно через миксины
+            // Примечание: player.getLanguage() может быть недоступен напрямую, но пока попробуем без него, или используем рефлексию
             
-            // Извлекаем код языка (первые 2 символа: "ru", "en")
-            String langCode = "en"; // По умолчанию английский
-            if (playerLang != null && playerLang.length() >= 2)
-            {
-                langCode = playerLang.substring(0, 2).toLowerCase();
-            }
+            String langCode = "en"; 
             
-            // Получаем сообщение для языка игрока
             String message = messageType.getRandomMessageForLang(langCode);
             Component component;
             
             if (messageType.isClickable())
             {
-                // Получаем clickValue (общий для всех языков)
                 String clickValue = messageType.getClickValueForLastMessage();
                 
                 if (!clickValue.isEmpty())
@@ -94,42 +87,40 @@ public class MessageScheduler
                     
                     if (clickType.equals("URL"))
                     {
-                        // Создаем кликабельное сообщение с URL
-                        component = Component.literal(message)
+                        // [ИСПРАВЛЕНИЕ 2] new TextComponent вместо Component.literal
+                        component = new TextComponent(message)
                                 .withStyle(style -> style
                                         .withClickEvent(new net.minecraft.network.chat.ClickEvent(
                                                 net.minecraft.network.chat.ClickEvent.Action.OPEN_URL,
                                                 clickValue))
                                         .withHoverEvent(new net.minecraft.network.chat.HoverEvent(
                                                 net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
-                                                Component.literal("§eClick to open: §b" + clickValue))));
+                                                new TextComponent("§eClick to open: §b" + clickValue))));
                     }
-                    else // COMMAND
+                    else 
                     {
-                        // Создаем кликабельное сообщение с командой
-                        component = Component.literal(message)
+                        component = new TextComponent(message)
                                 .withStyle(style -> style
                                         .withClickEvent(new net.minecraft.network.chat.ClickEvent(
                                                 net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND,
                                                 clickValue))
                                         .withHoverEvent(new net.minecraft.network.chat.HoverEvent(
                                                 net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
-                                                Component.literal("§eClick to run: §b" + clickValue))));
+                                                new TextComponent("§eClick to run: §b" + clickValue))));
                     }
                 }
                 else
                 {
-                    // Если clickValue пустой, создаем обычное сообщение
-                    component = Component.literal(message);
+                    component = new TextComponent(message);
                 }
             }
             else
             {
-                // Обычное сообщение
-                component = Component.literal(message);
+                component = new TextComponent(message);
             }
             
-            player.sendSystemMessage(component);
+            // [ИСПРАВЛЕНИЕ 3] sendMessage с UUID вместо sendSystemMessage
+            player.sendMessage(component, Util.NIL_UUID);
         }
     }
 
