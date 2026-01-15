@@ -22,7 +22,7 @@ public class NotifyCommand
         
         dispatcher.register(
             Commands.literal("notify")
-                .requires(source -> source.hasPermission(2)) // Требует OP уровень 2
+                .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("reload")
                     .executes(NotifyCommand::reload))
         );
@@ -36,15 +36,14 @@ public class NotifyCommand
         {
             ExampleMod.LOGGER.info("Принудительная перезагрузка конфига через команду /notify reload");
             
-            // Перезагружаем конфиг
             Config.reload();
             
-            // Сбрасываем и переинициализируем планировщик
             MessageScheduler.reset();
             MessageScheduler.initialize();
             
-            source.sendSuccess(() -> Component.literal("§a[Notify] §7Конфигурация перезагружена!"), true);
-            source.sendSuccess(() -> Component.literal("§7Загружено типов сообщений: §e" + Config.messageTypes.size()), false);
+            // ИСПРАВЛЕНИЕ: Убрано "() ->" перед Component.literal
+            source.sendSuccess(Component.literal("§a[Notify] §7Конфигурация перезагружена!"), true);
+            source.sendSuccess(Component.literal("§7Загружено типов сообщений: §e" + Config.messageTypes.size()), false);
             
             return 1;
         }
