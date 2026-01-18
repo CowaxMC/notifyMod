@@ -21,6 +21,10 @@ public class MessageScheduler
     private static boolean initialized = false;
     // Хранилище языков игроков (UUID -> код языка)
     private static final Map<UUID, String> playerLanguages = new HashMap<>();
+    // Время последней проверки языка для каждого игрока (UUID -> timestamp)
+    private static final Map<UUID, Long> lastLanguageCheck = new HashMap<>();
+    // Интервал проверки языка в миллисекундах (300 секунд)
+    private static final long LANGUAGE_CHECK_INTERVAL_MS = 300_000L;
 
     public static void initialize()
     {
@@ -71,55 +75,140 @@ public class MessageScheduler
     }
 
     /**
-     * Получает код языка игрока, используя сохраненное значение
-     * Оптимизировано: не вызывает player.getLanguage() если язык уже сохранен
+     * Получает код языка игрока, автоматически обновляя его периодически
+     * Проверяет текущий язык игрока раз в LANGUAGE_CHECK_INTERVAL_MS миллисекунд
      */
     private static String getPlayerLanguageCode(ServerPlayer player)
     {
         UUID playerUUID = player.getUUID();
+        long currentTime = System.currentTimeMillis();
         
-        // Сначала проверяем сохраненное значение (быстрая операция)
-        String savedLangCode = playerLanguages.get(playerUUID);
-        if (savedLangCode != null && !savedLangCode.isEmpty())
+        // Получаем время последней проверки языка
+        Long lastCheckTime = lastLanguageCheck.get(playerUUID);
+        
+        // Проверяем язык только если:
+        // 1. Язык еще не проверялся (lastCheckTime == null)
+        // 2. Прошло достаточно времени с последней проверки (больше интервала)
+        boolean shouldCheckLanguage = (lastCheckTime == null) || 
+                                     (currentTime - lastCheckTime >= LANGUAGE_CHECK_INTERVAL_MS);
+        
+        if (shouldCheckLanguage)
         {
-            // Используем сохраненное значение без вызова player.getLanguage()
-            // Это значительно снижает нагрузку, так как getLanguage() может быть тяжелой операцией
-            return savedLangCode;
+            // Получаем текущий язык игрока
+            String currentLang = player.getLanguage();
+            
+            // Если язык не определен, используем кэшированный или "en"
+            if (currentLang == null || currentLang.isEmpty())
+            {
+                String savedLangCode = playerLanguages.get(playerUUID);
+                String langCode = (savedLangCode != null && !savedLangCode.isEmpty()) ? savedLangCode : "en";
+                lastLanguageCheck.put(playerUUID, currentTime);
+                return langCode;
+            }
+            
+            // Извлекаем код языка из текущего языка игрока
+            String normalized = currentLang.trim().toLowerCase();
+            String extractedLangCode = "en";
+            
+            // Если есть подчеркивание или дефис, берем первую часть
+            int separatorIndex = Math.max(normalized.indexOf('_'), normalized.indexOf('-'));
+            if (separatorIndex > 0)
+            {
+                extractedLangCode = normalized.substring(0, separatorIndex);
+            }
+            else if (normalized.length() >= 2)
+            {
+                extractedLangCode = normalized.substring(0, 2);
+            }
+            
+            // Проверяем, что язык поддерживается в конфиге
+            if (!Config.supportedLanguages.contains(extractedLangCode))
+            {
+                extractedLangCode = "en";
+            }
+            
+            // Получаем сохраненный язык
+            String savedLangCode = playerLanguages.get(playerUUID);
+            
+            // Если язык изменился, обновляем кэш
+            if (savedLangCode == null || !savedLangCode.equals(extractedLangCode))
+            {
+                playerLanguages.put(playerUUID, extractedLangCode);
+                ExampleMod.LOGGER.debug("[Notify] Language auto-updated for player {}: '{}' -> '{}' (original: '{}')", 
+                                       player.getName().getString(), savedLangCode, extractedLangCode, currentLang);
+            }
+            
+            // Обновляем время последней проверки
+            lastLanguageCheck.put(playerUUID, currentTime);
+            
+            return extractedLangCode;
         }
-        
-        // Если сохраненного значения нет, получаем текущий язык (только один раз)
-        String playerLang = player.getLanguage();
-        String currentLangCode = "en"; // По умолчанию английский
-        
-        if (playerLang != null && playerLang.length() >= 2)
+        else
         {
-            currentLangCode = playerLang.substring(0, 2).toLowerCase();
+            // Используем кэшированный язык без проверки
+            String savedLangCode = playerLanguages.get(playerUUID);
+            return (savedLangCode != null && !savedLangCode.isEmpty()) ? savedLangCode : "en";
         }
-        
-        // Сохраняем для будущего использования
-        playerLanguages.put(playerUUID, currentLangCode);
-        return currentLangCode;
     }
     
     /**
-     * Обновляет сохраненный язык игрока
+     * Обновляет сохраненный язык игрока и возвращает код языка
      */
-    public static void updatePlayerLanguage(ServerPlayer player)
+    private static String updatePlayerLanguage(ServerPlayer player)
     {
         UUID playerUUID = player.getUUID();
         String playerLang = player.getLanguage();
         
         String langCode = "en"; // По умолчанию английский
-        if (playerLang != null && playerLang.length() >= 2)
+        
+        if (playerLang != null && !playerLang.isEmpty())
         {
-            langCode = playerLang.substring(0, 2).toLowerCase();
+            // Обработка различных форматов языковых кодов:
+            // "ru_RU" -> "ru", "en_US" -> "en", "ru" -> "ru", "en" -> "en"
+            String normalized = playerLang.trim().toLowerCase();
+            
+            // Если есть подчеркивание или дефис, берем первую часть
+            int separatorIndex = Math.max(normalized.indexOf('_'), normalized.indexOf('-'));
+            if (separatorIndex > 0)
+            {
+                langCode = normalized.substring(0, separatorIndex);
+            }
+            else if (normalized.length() >= 2)
+            {
+                // Если это короткий код (2+ символа), берем первые 2
+                langCode = normalized.substring(0, 2);
+            }
+            
+            // Проверяем, что язык поддерживается в конфиге, иначе fallback на "en"
+            if (!Config.supportedLanguages.contains(langCode))
+            {
+                ExampleMod.LOGGER.debug("[Notify] Language '{}' (from '{}') not supported in config, using 'en' for player {}", 
+                                       langCode, playerLang, player.getName().getString());
+                langCode = "en";
+            }
         }
         
+        // Сохраняем для будущего использования
         playerLanguages.put(playerUUID, langCode);
+        ExampleMod.LOGGER.debug("[Notify] Language '{}' detected for player {} (original: '{}')", 
+                               langCode, player.getName().getString(), playerLang);
+        
+        return langCode;
+    }
+    
+    /**
+     * Публичный метод для обновления языка игрока (используется в событиях)
+     */
+    public static void updatePlayerLanguagePublic(ServerPlayer player)
+    {
+        updatePlayerLanguage(player);
     }
 
     private static void sendMessageToAllPlayers(MinecraftServer server, MessageType messageType)
     {
+        // Логируем начало проверки языков игроков
+        ExampleMod.LOGGER.info("[Notify] Проверка языков игроков для отправки сообщения типа '{}'", messageType.getName());
+        
         // Отправляем каждому игроку персонализированное сообщение на его языке
         for (ServerPlayer player : server.getPlayerList().getPlayers())
         {
@@ -184,6 +273,19 @@ public class MessageScheduler
     {
         initialized = false;
         messageTypes.clear();
+        // Не очищаем playerLanguages - языки игроков не меняются при перезагрузке конфига
+        // playerLanguages.clear();
+    }
+    
+    /**
+     * Очищает кэш языков игроков (для команды /notify resetlangs)
+     */
+    public static void resetLanguages()
+    {
+        int clearedCount = playerLanguages.size();
+        playerLanguages.clear();
+        lastLanguageCheck.clear(); // Очищаем и кэш времени проверок
+        ExampleMod.LOGGER.info("[Notify] Cleared language cache for {} players", clearedCount);
     }
     
     /**
@@ -194,7 +296,8 @@ public class MessageScheduler
     {
         if (event.getEntity() instanceof ServerPlayer player)
         {
-            updatePlayerLanguage(player);
+            // Используем публичный метод для обновления языка
+            updatePlayerLanguagePublic(player);
         }
     }
     
@@ -207,7 +310,7 @@ public class MessageScheduler
         if (event.getEntity() instanceof ServerPlayer player)
         {
             // Обновляем язык после респавна (после смерти)
-            updatePlayerLanguage(player);
+            updatePlayerLanguagePublic(player);
         }
     }
     
@@ -219,7 +322,9 @@ public class MessageScheduler
     {
         if (event.getEntity() instanceof ServerPlayer player)
         {
-            playerLanguages.remove(player.getUUID());
+            UUID playerUUID = player.getUUID();
+            playerLanguages.remove(playerUUID);
+            lastLanguageCheck.remove(playerUUID);
         }
     }
 }

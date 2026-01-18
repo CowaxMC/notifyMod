@@ -5,6 +5,7 @@ import com.mojang.brigadier.context.CommandContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -25,6 +26,8 @@ public class NotifyCommand
                 .requires(source -> source.hasPermission(2)) // Требует OP уровень 2
                 .then(Commands.literal("reload")
                     .executes(NotifyCommand::reload))
+                .then(Commands.literal("resetlangs")
+                    .executes(NotifyCommand::resetLanguages))
         );
     }
 
@@ -51,6 +54,38 @@ public class NotifyCommand
         catch (Exception e)
         {
             source.sendFailure(Component.literal("§c[Notify] §7Ошибка при перезагрузке: " + e.getMessage()));
+            e.printStackTrace();
+            return 0;
+        }
+    }
+
+    private static int resetLanguages(CommandContext<CommandSourceStack> context)
+    {
+        CommandSourceStack source = context.getSource();
+        
+        try
+        {
+            ExampleMod.LOGGER.info("Очистка кэша языков игроков через команду /notify resetlangs");
+            
+            // Очищаем кэш языков
+            MessageScheduler.resetLanguages();
+            
+            // Если команда выполнена игроком, обновляем его язык
+            if (source.getEntity() instanceof ServerPlayer player)
+            {
+                MessageScheduler.updatePlayerLanguagePublic(player);
+                source.sendSuccess(() -> Component.literal("§a[Notify] §7Кэш языков очищен! Ваш язык обновлен."), true);
+            }
+            else
+            {
+                source.sendSuccess(() -> Component.literal("§a[Notify] §7Кэш языков очищен! Языки будут определяться заново при входе игроков."), true);
+            }
+            
+            return 1;
+        }
+        catch (Exception e)
+        {
+            source.sendFailure(Component.literal("§c[Notify] §7Ошибка при очистке кэша: " + e.getMessage()));
             e.printStackTrace();
             return 0;
         }
