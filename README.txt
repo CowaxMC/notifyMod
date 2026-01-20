@@ -1,3 +1,5 @@
+CurseForge link:
+https://www.curseforge.com/minecraft/mc-mods/notify-server-messages
 
 Source installation information for modders
 -------------------------------------------
