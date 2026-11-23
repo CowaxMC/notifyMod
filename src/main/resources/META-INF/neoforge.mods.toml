@@ -1,0 +1,31 @@
+# The name of the mod loader type to load - for regular FML @Mod mods it should be javafml
+modLoader="javafml" #mandatory
+# A version range to match for said mod loader
+loaderVersion="${loader_version_range}" #mandatory
+# The license for your mod
+license="${mod_license}"
+
+# A list of mods - how many allowed here is determined by the individual mod loader
+[[mods]] #mandatory
+modId="${mod_id}" #mandatory
+version="${mod_version}" #mandatory
+displayName="${mod_name}" #mandatory
+authors="${mod_authors}" #optional
+description='''${mod_description}'''
+
+# Server-side mod with no required custom network payloads:
+# vanilla and unmodded NeoForge clients can connect without installing this mod.
+
+[[dependencies.${mod_id}]]
+    modId="neoforge"
+    type="required"
+    versionRange="${neo_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    type="required"
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"

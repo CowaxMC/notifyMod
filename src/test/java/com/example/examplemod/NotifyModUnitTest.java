@@ -1,7 +1,6 @@
 package com.example.examplemod;
 
 import net.minecraft.network.chat.ClickEvent;
-import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -138,27 +137,28 @@ class NotifyModUnitTest
     }
 
     @Test
-    void testBuildMessageComponentNormalizesCommandAndValidatesUrls()
+    void testResolveClickActionNormalizesCommandAndValidatesUrls()
     {
-        Component cmdWithoutSlash = MessageScheduler.buildMessageComponent("Click", true, "COMMAND", "rules");
-        ClickEvent cmdEvent = cmdWithoutSlash.getStyle().getClickEvent();
-        assertNotNull(cmdEvent);
-        assertEquals(ClickEvent.Action.RUN_COMMAND, cmdEvent.getAction());
-        assertEquals("/rules", cmdEvent.getValue());
+        MessageScheduler.ClickActionSpec cmdWithoutSlash =
+                MessageScheduler.resolveClickAction(true, "COMMAND", "rules");
+        assertNotNull(cmdWithoutSlash);
+        assertEquals(ClickEvent.Action.RUN_COMMAND, cmdWithoutSlash.action());
+        assertEquals("/rules", cmdWithoutSlash.value());
 
-        Component validUrl = MessageScheduler.buildMessageComponent("Donate", true, "URL", "https://example.com/donate");
-        ClickEvent urlEvent = validUrl.getStyle().getClickEvent();
-        assertNotNull(urlEvent);
-        assertEquals(ClickEvent.Action.OPEN_URL, urlEvent.getAction());
-        assertEquals("https://example.com/donate", urlEvent.getValue());
+        MessageScheduler.ClickActionSpec suggestCmd =
+                MessageScheduler.resolveClickAction(true, "SUGGEST_COMMAND", "msg ");
+        assertNotNull(suggestCmd);
+        assertEquals(ClickEvent.Action.SUGGEST_COMMAND, suggestCmd.action());
+        assertEquals("/msg", suggestCmd.value());
 
-        Component invalidUrl = MessageScheduler.buildMessageComponent("Bad", true, "URL", "javascript:alert(1)");
-        assertNull(invalidUrl.getStyle().getClickEvent());
+        MessageScheduler.ClickActionSpec validUrl =
+                MessageScheduler.resolveClickAction(true, "URL", "https://example.com/donate");
+        assertNotNull(validUrl);
+        assertEquals(ClickEvent.Action.OPEN_URL, validUrl.action());
+        assertEquals("https://example.com/donate", validUrl.value());
 
-        Component blankClick = MessageScheduler.buildMessageComponent("Blank", true, "COMMAND", "   ");
-        assertNull(blankClick.getStyle().getClickEvent());
-
-        Component unknownType = MessageScheduler.buildMessageComponent("Unknown", true, "OPEN_FILE", "/etc/passwd");
-        assertNull(unknownType.getStyle().getClickEvent());
+        assertNull(MessageScheduler.resolveClickAction(true, "URL", "javascript:alert(1)"));
+        assertNull(MessageScheduler.resolveClickAction(true, "COMMAND", "   "));
+        assertNull(MessageScheduler.resolveClickAction(true, "OPEN_FILE", "/etc/passwd"));
     }
 }

@@ -5,10 +5,10 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Mod.EventBusSubscriber(modid = ExampleMod.MODID)
+@EventBusSubscriber(modid = ExampleMod.MODID)
 public class MessageScheduler
 {
     private static final List<MessageType> messageTypes = new ArrayList<>();
@@ -62,13 +62,8 @@ public class MessageScheduler
     }
 
     @SubscribeEvent
-    public static void onServerTick(TickEvent.ServerTickEvent event)
+    public static void onServerTick(ServerTickEvent.Post event)
     {
-        if (event.phase != TickEvent.Phase.END)
-        {
-            return;
-        }
-
         if (!initialized)
         {
             initialize();
@@ -204,11 +199,13 @@ public class MessageScheduler
         }
     }
 
-    static Component buildMessageComponent(String message, boolean clickable, String clickType, String clickValue)
+    record ClickActionSpec(ClickEvent.Action action, String value, String hoverPrefix) {}
+
+    static ClickActionSpec resolveClickAction(boolean clickable, String clickType, String clickValue)
     {
         if (!clickable || clickValue == null || clickValue.isBlank())
         {
-            return Component.literal(message);
+            return null;
         }
 
         String trimmedValue = clickValue.trim();
@@ -219,35 +216,40 @@ public class MessageScheduler
                 if (!Config.isValidHttpUrl(trimmedValue))
                 {
                     ExampleMod.LOGGER.warn("[Notify] Skipping invalid click URL '{}'", trimmedValue);
-                    yield Component.literal(message);
+                    yield null;
                 }
-                yield Component.literal(message)
-                        .withStyle(style -> style
-                                .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, trimmedValue))
-                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                        Component.literal("§eClick to open: §b" + trimmedValue))));
+                yield new ClickActionSpec(ClickEvent.Action.OPEN_URL, trimmedValue, "§eClick to open: §b");
             }
-            case "COMMAND" -> {
-                String command = normalizeCommandValue(trimmedValue);
-                yield Component.literal(message)
-                        .withStyle(style -> style
-                                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
-                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                        Component.literal("§eClick to run: §b" + command))));
-            }
-            case "SUGGEST_COMMAND" -> {
-                String command = normalizeCommandValue(trimmedValue);
-                yield Component.literal(message)
-                        .withStyle(style -> style
-                                .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, command))
-                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                        Component.literal("§eClick to suggest: §b" + command))));
-            }
+            case "COMMAND" -> new ClickActionSpec(
+                    ClickEvent.Action.RUN_COMMAND,
+                    normalizeCommandValue(trimmedValue),
+                    "§eClick to run: §b"
+            );
+            case "SUGGEST_COMMAND" -> new ClickActionSpec(
+                    ClickEvent.Action.SUGGEST_COMMAND,
+                    normalizeCommandValue(trimmedValue),
+                    "§eClick to suggest: §b"
+            );
             default -> {
                 ExampleMod.LOGGER.warn("[Notify] Unsupported clickType '{}', sending plain message", clickType);
-                yield Component.literal(message);
+                yield null;
             }
         };
+    }
+
+    static Component buildMessageComponent(String message, boolean clickable, String clickType, String clickValue)
+    {
+        ClickActionSpec spec = resolveClickAction(clickable, clickType, clickValue);
+        if (spec == null)
+        {
+            return Component.literal(message);
+        }
+
+        return Component.literal(message)
+                .withStyle(style -> style
+                        .withClickEvent(new ClickEvent(spec.action(), spec.value()))
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                Component.literal(spec.hoverPrefix() + spec.value()))));
     }
 
     static String normalizeCommandValue(String rawCommand)
