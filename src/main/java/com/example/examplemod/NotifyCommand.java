@@ -5,22 +5,20 @@ import com.mojang.brigadier.context.CommandContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.event.server.ServerStartingEvent;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.config.ModConfig;
 
 @Mod.EventBusSubscriber(modid = ExampleMod.MODID)
 public class NotifyCommand
 {
-    private static ModConfig modConfig;
-
     @SubscribeEvent
-    public static void onServerStarting(ServerStartingEvent event)
+    public static void onRegisterCommands(RegisterCommandsEvent event)
     {
-        CommandDispatcher<CommandSourceStack> dispatcher = event.getServer().getCommands().getDispatcher();
-        
+        CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
+
         dispatcher.register(
             Commands.literal("notify")
                 .requires(source -> source.hasPermission(2)) // Требует OP уровень 2
@@ -34,27 +32,24 @@ public class NotifyCommand
     private static int reload(CommandContext<CommandSourceStack> context)
     {
         CommandSourceStack source = context.getSource();
-        
+
         try
         {
             ExampleMod.LOGGER.info("Принудительная перезагрузка конфига через команду /notify reload");
-            
-            // Перезагружаем конфиг
+
             Config.reload();
-            
-            // Сбрасываем и переинициализируем планировщик
             MessageScheduler.reset();
             MessageScheduler.initialize();
-            
+
             source.sendSuccess(() -> Component.literal("§a[Notify] §7Конфигурация перезагружена!"), true);
-            source.sendSuccess(() -> Component.literal("§7Загружено типов сообщений: §e" + Config.messageTypes.size()), false);
-            
+            source.sendSuccess(() -> Component.literal("§7Загружено типов сообщений: §e" + MessageScheduler.getActiveMessageTypeCount()), false);
+
             return 1;
         }
         catch (Exception e)
         {
+            ExampleMod.LOGGER.error("[Notify] Ошибка при перезагрузке конфигурации", e);
             source.sendFailure(Component.literal("§c[Notify] §7Ошибка при перезагрузке: " + e.getMessage()));
-            e.printStackTrace();
             return 0;
         }
     }
@@ -62,31 +57,37 @@ public class NotifyCommand
     private static int resetLanguages(CommandContext<CommandSourceStack> context)
     {
         CommandSourceStack source = context.getSource();
-        
+
         try
         {
             ExampleMod.LOGGER.info("Очистка кэша языков игроков через команду /notify resetlangs");
-            
-            // Очищаем кэш языков
+
             MessageScheduler.resetLanguages();
-            
-            // Если команда выполнена игроком, обновляем его язык
-            if (source.getEntity() instanceof ServerPlayer player)
+
+            MinecraftServer server = source.getServer();
+            if (server != null)
             {
-                MessageScheduler.updatePlayerLanguagePublic(player);
-                source.sendSuccess(() -> Component.literal("§a[Notify] §7Кэш языков очищен! Ваш язык обновлен."), true);
+                for (ServerPlayer player : server.getPlayerList().getPlayers())
+                {
+                    MessageScheduler.updatePlayerLanguagePublic(player);
+                }
+            }
+
+            if (source.getEntity() instanceof ServerPlayer)
+            {
+                source.sendSuccess(() -> Component.literal("§a[Notify] §7Кэш языков очищен! Языки онлайн-игроков обновлены."), true);
             }
             else
             {
-                source.sendSuccess(() -> Component.literal("§a[Notify] §7Кэш языков очищен! Языки будут определяться заново при входе игроков."), true);
+                source.sendSuccess(() -> Component.literal("§a[Notify] §7Кэш языков очищен! Языки онлайн-игроков обновлены."), true);
             }
-            
+
             return 1;
         }
         catch (Exception e)
         {
+            ExampleMod.LOGGER.error("[Notify] Ошибка при очистке кэша языков", e);
             source.sendFailure(Component.literal("§c[Notify] §7Ошибка при очистке кэша: " + e.getMessage()));
-            e.printStackTrace();
             return 0;
         }
     }

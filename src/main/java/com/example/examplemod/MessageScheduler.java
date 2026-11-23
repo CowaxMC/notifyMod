@@ -1,6 +1,8 @@
 package com.example.examplemod;
 
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
@@ -9,65 +11,81 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Mod.EventBusSubscriber(modid = ExampleMod.MODID)
 public class MessageScheduler
 {
     private static final List<MessageType> messageTypes = new ArrayList<>();
     private static boolean initialized = false;
-    // Хранилище языков игроков (UUID -> код языка)
-    private static final Map<UUID, String> playerLanguages = new HashMap<>();
-    // Время последней проверки языка для каждого игрока (UUID -> timestamp)
-    private static final Map<UUID, Long> lastLanguageCheck = new HashMap<>();
-    // Интервал проверки языка в миллисекундах (300 секунд)
-    private static final long LANGUAGE_CHECK_INTERVAL_MS = 300_000L;
+    // Кэш последнего определённого языка игроков (UUID -> код языка)
+    private static final Map<UUID, String> playerLanguages = new ConcurrentHashMap<>();
 
     public static void initialize()
     {
         if (initialized)
+        {
             return;
+        }
 
         messageTypes.clear();
+        long now = System.currentTimeMillis();
 
         // Инициализируем типы сообщений из конфига
         for (String typeName : Config.messageTypes)
         {
             Config.MessageConfig config = Config.messageConfigs.get(typeName);
-            if (config != null)
+            if (config == null)
             {
-                messageTypes.add(new MessageType(typeName, config.messagesByLang, config.clickValues,
-                                                config.intervalSeconds, config.clickable, config.clickType));
+                continue;
             }
+            if (config.intervalSeconds <= 0)
+            {
+                ExampleMod.LOGGER.warn("[Notify] Skipping message type '{}' because intervalSeconds={} (must be > 0)",
+                        typeName, config.intervalSeconds);
+                continue;
+            }
+            messageTypes.add(new MessageType(typeName, config.messagesByLang, config.clickValues,
+                    config.intervalSeconds, config.clickable, config.clickType, now));
         }
 
         initialized = true;
+    }
+
+    public static int getActiveMessageTypeCount()
+    {
+        return messageTypes.size();
     }
 
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event)
     {
         if (event.phase != TickEvent.Phase.END)
+        {
             return;
+        }
 
         if (!initialized)
+        {
             initialize();
+        }
 
         MinecraftServer server = event.getServer();
         if (server == null)
+        {
             return;
+        }
 
         long currentTime = System.currentTimeMillis();
 
-        // Проверяем каждый тип сообщения
         for (MessageType messageType : messageTypes)
         {
             if (messageType.shouldSend(currentTime))
             {
-                // Отправляем сообщение всем игрокам (каждому на его языке)
                 sendMessageToAllPlayers(server, messageType);
                 messageType.setLastSentTime(currentTime);
             }
@@ -75,129 +93,86 @@ public class MessageScheduler
     }
 
     /**
-     * Получает код языка игрока, автоматически обновляя его периодически
-     * Проверяет текущий язык игрока раз в LANGUAGE_CHECK_INTERVAL_MS миллисекунд
+     * Определяет актуальный язык игрока напрямую по ServerPlayer#getLanguage()
+     * (O(1) чтение поля) с кэшированием последнего результата для логов и сброса.
      */
     private static String getPlayerLanguageCode(ServerPlayer player)
     {
-        UUID playerUUID = player.getUUID();
-        long currentTime = System.currentTimeMillis();
-        
-        // Получаем время последней проверки языка
-        Long lastCheckTime = lastLanguageCheck.get(playerUUID);
-        
-        // Проверяем язык только если:
-        // 1. Язык еще не проверялся (lastCheckTime == null)
-        // 2. Прошло достаточно времени с последней проверки (больше интервала)
-        boolean shouldCheckLanguage = (lastCheckTime == null) || 
-                                     (currentTime - lastCheckTime >= LANGUAGE_CHECK_INTERVAL_MS);
-        
-        if (shouldCheckLanguage)
-        {
-            // Получаем текущий язык игрока
-            String currentLang = player.getLanguage();
-            
-            // Если язык не определен, используем кэшированный или "en"
-            if (currentLang == null || currentLang.isEmpty())
-            {
-                String savedLangCode = playerLanguages.get(playerUUID);
-                String langCode = (savedLangCode != null && !savedLangCode.isEmpty()) ? savedLangCode : "en";
-                lastLanguageCheck.put(playerUUID, currentTime);
-                return langCode;
-            }
-            
-            // Извлекаем код языка из текущего языка игрока
-            String normalized = currentLang.trim().toLowerCase();
-            String extractedLangCode = "en";
-            
-            // Если есть подчеркивание или дефис, берем первую часть
-            int separatorIndex = Math.max(normalized.indexOf('_'), normalized.indexOf('-'));
-            if (separatorIndex > 0)
-            {
-                extractedLangCode = normalized.substring(0, separatorIndex);
-            }
-            else if (normalized.length() >= 2)
-            {
-                extractedLangCode = normalized.substring(0, 2);
-            }
-            
-            // Проверяем, что язык поддерживается в конфиге
-            if (!Config.supportedLanguages.contains(extractedLangCode))
-            {
-                extractedLangCode = "en";
-            }
-            
-            // Получаем сохраненный язык
-            String savedLangCode = playerLanguages.get(playerUUID);
-            
-            // Если язык изменился, обновляем кэш
-            if (savedLangCode == null || !savedLangCode.equals(extractedLangCode))
-            {
-                playerLanguages.put(playerUUID, extractedLangCode);
-                ExampleMod.LOGGER.debug("[Notify] Language auto-updated for player {}: '{}' -> '{}' (original: '{}')", 
-                                       player.getName().getString(), savedLangCode, extractedLangCode, currentLang);
-            }
-            
-            // Обновляем время последней проверки
-            lastLanguageCheck.put(playerUUID, currentTime);
-            
-            return extractedLangCode;
-        }
-        else
-        {
-            // Используем кэшированный язык без проверки
-            String savedLangCode = playerLanguages.get(playerUUID);
-            return (savedLangCode != null && !savedLangCode.isEmpty()) ? savedLangCode : "en";
-        }
+        return updatePlayerLanguage(player);
     }
-    
-    /**
-     * Обновляет сохраненный язык игрока и возвращает код языка
-     */
+
     private static String updatePlayerLanguage(ServerPlayer player)
     {
         UUID playerUUID = player.getUUID();
-        String playerLang = player.getLanguage();
-        
-        String langCode = "en"; // По умолчанию английский
-        
-        if (playerLang != null && !playerLang.isEmpty())
+        String rawLang = player.getLanguage();
+        String resolved = resolveSupportedLanguage(rawLang, Config.supportedLanguages);
+
+        String previous = playerLanguages.put(playerUUID, resolved);
+        if (previous == null || !previous.equals(resolved))
         {
-            // Обработка различных форматов языковых кодов:
-            // "ru_RU" -> "ru", "en_US" -> "en", "ru" -> "ru", "en" -> "en"
-            String normalized = playerLang.trim().toLowerCase();
-            
-            // Если есть подчеркивание или дефис, берем первую часть
-            int separatorIndex = Math.max(normalized.indexOf('_'), normalized.indexOf('-'));
-            if (separatorIndex > 0)
+            ExampleMod.LOGGER.debug("[Notify] Language for player {}: '{}' -> '{}' (raw: '{}')",
+                    player.getName().getString(), previous, resolved, rawLang);
+        }
+
+        return resolved;
+    }
+
+    /**
+     * Нормализует язык клиента и подбирает наиболее подходящий код из supportedLanguages:
+     * 1) точное совпадение (например, "zh_cn"),
+     * 2) базовый код до '_' или '-' (например, "ru_ru" -> "ru", "fil_ph" -> "fil"),
+     * 3) "en" (если поддерживается), иначе первый язык в списке supportedLanguages.
+     */
+    public static String resolveSupportedLanguage(String rawLang, List<String> supportedLanguages)
+    {
+        List<String> normalizedSupported = new ArrayList<>();
+        if (supportedLanguages != null)
+        {
+            for (String lang : supportedLanguages)
             {
-                langCode = normalized.substring(0, separatorIndex);
-            }
-            else if (normalized.length() >= 2)
-            {
-                // Если это короткий код (2+ символа), берем первые 2
-                langCode = normalized.substring(0, 2);
-            }
-            
-            // Проверяем, что язык поддерживается в конфиге, иначе fallback на "en"
-            if (!Config.supportedLanguages.contains(langCode))
-            {
-                ExampleMod.LOGGER.debug("[Notify] Language '{}' (from '{}') not supported in config, using 'en' for player {}", 
-                                       langCode, playerLang, player.getName().getString());
-                langCode = "en";
+                if (lang != null && !lang.isBlank())
+                {
+                    normalizedSupported.add(lang.trim().toLowerCase(Locale.ROOT));
+                }
             }
         }
-        
-        // Сохраняем для будущего использования
-        playerLanguages.put(playerUUID, langCode);
-        ExampleMod.LOGGER.debug("[Notify] Language '{}' detected for player {} (original: '{}')", 
-                               langCode, player.getName().getString(), playerLang);
-        
-        return langCode;
+
+        String fallback = normalizedSupported.contains("en")
+                ? "en"
+                : (normalizedSupported.isEmpty() ? "en" : normalizedSupported.get(0));
+
+        if (rawLang == null || rawLang.isBlank())
+        {
+            return fallback;
+        }
+
+        String normalized = rawLang.trim().toLowerCase(Locale.ROOT);
+        if (normalizedSupported.isEmpty())
+        {
+            int sep = Config.findLanguageSeparatorIndex(normalized);
+            return sep > 0 ? normalized.substring(0, sep) : normalized;
+        }
+
+        if (normalizedSupported.contains(normalized))
+        {
+            return normalized;
+        }
+
+        int sep = Config.findLanguageSeparatorIndex(normalized);
+        if (sep > 0)
+        {
+            String baseCode = normalized.substring(0, sep);
+            if (normalizedSupported.contains(baseCode))
+            {
+                return baseCode;
+            }
+        }
+
+        return fallback;
     }
-    
+
     /**
-     * Публичный метод для обновления языка игрока (используется в событиях)
+     * Публичный метод для обновления языка игрока (используется в событиях и командах).
      */
     public static void updatePlayerLanguagePublic(ServerPlayer player)
     {
@@ -206,125 +181,130 @@ public class MessageScheduler
 
     private static void sendMessageToAllPlayers(MinecraftServer server, MessageType messageType)
     {
-        // Логируем начало проверки языков игроков
-        ExampleMod.LOGGER.info("[Notify] Проверка языков игроков для отправки сообщения типа '{}'", messageType.getName());
-        
-        // Отправляем каждому игроку персонализированное сообщение на его языке
-        for (ServerPlayer player : server.getPlayerList().getPlayers())
+        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        if (players.isEmpty())
         {
-            // Получаем код языка игрока (используя сохраненное значение)
+            return;
+        }
+
+        ExampleMod.LOGGER.debug("[Notify] Sending scheduled message '{}' to {} player(s)",
+                messageType.getName(), players.size());
+
+        for (ServerPlayer player : players)
+        {
             String langCode = getPlayerLanguageCode(player);
-            
-            // Получаем сообщение для языка игрока
-            String message = messageType.getRandomMessageForLang(langCode);
-            Component component;
-            
-            if (messageType.isClickable())
-            {
-                // Получаем clickValue (общий для всех языков)
-                String clickValue = messageType.getClickValueForLastMessage();
-                
-                if (!clickValue.isEmpty())
-                {
-                    String clickType = messageType.getClickType().toUpperCase();
-                    
-                    if (clickType.equals("URL"))
-                    {
-                        // Создаем кликабельное сообщение с URL
-                        component = Component.literal(message)
-                                .withStyle(style -> style
-                                        .withClickEvent(new net.minecraft.network.chat.ClickEvent(
-                                                net.minecraft.network.chat.ClickEvent.Action.OPEN_URL,
-                                                clickValue))
-                                        .withHoverEvent(new net.minecraft.network.chat.HoverEvent(
-                                                net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
-                                                Component.literal("§eClick to open: §b" + clickValue))));
-                    }
-                    else // COMMAND
-                    {
-                        // Создаем кликабельное сообщение с командой
-                        component = Component.literal(message)
-                                .withStyle(style -> style
-                                        .withClickEvent(new net.minecraft.network.chat.ClickEvent(
-                                                net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND,
-                                                clickValue))
-                                        .withHoverEvent(new net.minecraft.network.chat.HoverEvent(
-                                                net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
-                                                Component.literal("§eClick to run: §b" + clickValue))));
-                    }
-                }
-                else
-                {
-                    // Если clickValue пустой, создаем обычное сообщение
-                    component = Component.literal(message);
-                }
-            }
-            else
-            {
-                // Обычное сообщение
-                component = Component.literal(message);
-            }
-            
+            MessageType.ResolvedMessage resolved = messageType.pickRandomMessageForLang(langCode);
+            Component component = buildMessageComponent(
+                    resolved.text(),
+                    messageType.isClickable(),
+                    messageType.getClickType(),
+                    resolved.clickValue()
+            );
             player.sendSystemMessage(component);
         }
+    }
+
+    static Component buildMessageComponent(String message, boolean clickable, String clickType, String clickValue)
+    {
+        if (!clickable || clickValue == null || clickValue.isBlank())
+        {
+            return Component.literal(message);
+        }
+
+        String trimmedValue = clickValue.trim();
+        String normalizedType = clickType == null ? "" : clickType.trim().toUpperCase(Locale.ROOT);
+
+        return switch (normalizedType) {
+            case "URL" -> {
+                if (!Config.isValidHttpUrl(trimmedValue))
+                {
+                    ExampleMod.LOGGER.warn("[Notify] Skipping invalid click URL '{}'", trimmedValue);
+                    yield Component.literal(message);
+                }
+                yield Component.literal(message)
+                        .withStyle(style -> style
+                                .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, trimmedValue))
+                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                        Component.literal("§eClick to open: §b" + trimmedValue))));
+            }
+            case "COMMAND" -> {
+                String command = normalizeCommandValue(trimmedValue);
+                yield Component.literal(message)
+                        .withStyle(style -> style
+                                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
+                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                        Component.literal("§eClick to run: §b" + command))));
+            }
+            case "SUGGEST_COMMAND" -> {
+                String command = normalizeCommandValue(trimmedValue);
+                yield Component.literal(message)
+                        .withStyle(style -> style
+                                .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, command))
+                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                        Component.literal("§eClick to suggest: §b" + command))));
+            }
+            default -> {
+                ExampleMod.LOGGER.warn("[Notify] Unsupported clickType '{}', sending plain message", clickType);
+                yield Component.literal(message);
+            }
+        };
+    }
+
+    static String normalizeCommandValue(String rawCommand)
+    {
+        String trimmed = rawCommand.trim();
+        return trimmed.startsWith("/") ? trimmed : "/" + trimmed;
     }
 
     public static void reset()
     {
         initialized = false;
         messageTypes.clear();
-        // Не очищаем playerLanguages - языки игроков не меняются при перезагрузке конфига
-        // playerLanguages.clear();
     }
-    
+
     /**
-     * Очищает кэш языков игроков (для команды /notify resetlangs)
+     * Очищает кэш языков игроков (для команды /notify resetlangs и остановки сервера).
      */
     public static void resetLanguages()
     {
         int clearedCount = playerLanguages.size();
         playerLanguages.clear();
-        lastLanguageCheck.clear(); // Очищаем и кэш времени проверок
         ExampleMod.LOGGER.info("[Notify] Cleared language cache for {} players", clearedCount);
     }
-    
+
     /**
-     * Обработчик события входа игрока - сохраняем его язык
+     * Обработчик события входа игрока — сохраняет начальный язык.
      */
     @SubscribeEvent
     public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event)
     {
         if (event.getEntity() instanceof ServerPlayer player)
         {
-            // Используем публичный метод для обновления языка
             updatePlayerLanguagePublic(player);
         }
     }
-    
+
     /**
-     * Обработчик события изменения языка клиента
+     * Обработчик события респавна игрока — обновляет язык.
      */
     @SubscribeEvent
     public static void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event)
     {
         if (event.getEntity() instanceof ServerPlayer player)
         {
-            // Обновляем язык после респавна (после смерти)
             updatePlayerLanguagePublic(player);
         }
     }
-    
+
     /**
-     * Обработчик события выхода игрока - удаляем из кэша
+     * Обработчик события выхода игрока — удаляет из кэша.
      */
     @SubscribeEvent
     public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event)
     {
         if (event.getEntity() instanceof ServerPlayer player)
         {
-            UUID playerUUID = player.getUUID();
-            playerLanguages.remove(playerUUID);
-            lastLanguageCheck.remove(playerUUID);
+            playerLanguages.remove(player.getUUID());
         }
     }
 }

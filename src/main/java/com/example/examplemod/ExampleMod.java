@@ -3,6 +3,7 @@ package com.example.examplemod;
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.server.ServerStartingEvent;
+import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -43,8 +44,17 @@ public class ExampleMod
     @SubscribeEvent
     public void onServerStarting(ServerStartingEvent event)
     {
-        // Initialize message scheduler when server starts
+        // Reset and initialize message scheduler cleanly for each server session
+        MessageScheduler.reset();
         MessageScheduler.initialize();
         LOGGER.info("Message Scheduler initialized!");
+    }
+
+    @SubscribeEvent
+    public void onServerStopped(ServerStoppedEvent event)
+    {
+        MessageScheduler.reset();
+        MessageScheduler.resetLanguages();
+        LOGGER.info("Message Scheduler stopped!");
     }
 }

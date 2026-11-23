@@ -1,11 +1,19 @@
 package com.example.examplemod;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 
+/**
+ * Описывает один запланированный тип уведомлений и состояние его таймера.
+ */
 public class MessageType
 {
+    public record ResolvedMessage(String text, String clickValue) {}
+
     private final String name;
     private final Map<String, List<String>> messagesByLang;
     private final List<String> clickValues; // Общие для всех языков
@@ -14,20 +22,35 @@ public class MessageType
     private final String clickType;
     private long lastSentTime;
     private final Random random;
-    private int lastMessageIndex; // Индекс последнего выбранного сообщения
 
     public MessageType(String name, Map<String, List<String>> messagesByLang, List<String> clickValues,
-                      int intervalSeconds, boolean clickable, String clickType)
+                       int intervalSeconds, boolean clickable, String clickType)
+    {
+        this(name, messagesByLang, clickValues, intervalSeconds, clickable, clickType, System.currentTimeMillis());
+    }
+
+    MessageType(String name, Map<String, List<String>> messagesByLang, List<String> clickValues,
+                int intervalSeconds, boolean clickable, String clickType, long initialLastSentTime)
     {
         this.name = name;
-        this.messagesByLang = messagesByLang;
-        this.clickValues = clickValues;
+        Map<String, List<String>> copiedByLang = new LinkedHashMap<>();
+        if (messagesByLang != null)
+        {
+            for (Map.Entry<String, List<String>> entry : messagesByLang.entrySet())
+            {
+                if (entry.getKey() != null && entry.getValue() != null && !entry.getValue().isEmpty())
+                {
+                    copiedByLang.put(entry.getKey().toLowerCase(Locale.ROOT), List.copyOf(entry.getValue()));
+                }
+            }
+        }
+        this.messagesByLang = Collections.unmodifiableMap(copiedByLang);
+        this.clickValues = clickValues == null ? List.of() : List.copyOf(clickValues);
         this.intervalSeconds = intervalSeconds;
         this.clickable = clickable;
-        this.clickType = clickType;
-        this.lastSentTime = 0;
+        this.clickType = clickType == null ? "COMMAND" : clickType.trim().toUpperCase(Locale.ROOT);
+        this.lastSentTime = initialLastSentTime;
         this.random = new Random();
-        this.lastMessageIndex = 0;
     }
 
     public String getName()
@@ -35,44 +58,33 @@ public class MessageType
         return name;
     }
 
-    // Получить случайное сообщение для указанного языка
-    public String getRandomMessageForLang(String lang)
+    /**
+     * Выбирает случайное сообщение для указанного языка и соответствующий ему clickValue
+     * без мутабельного промежуточного состояния.
+     */
+    public ResolvedMessage pickRandomMessageForLang(String lang)
     {
-        List<String> messages = messagesByLang.get(lang);
-        
-        // Fallback на английский если язык не найден
-        if (messages == null || messages.isEmpty())
+        List<String> messages = Config.resolveMessagesForLang(messagesByLang, lang);
+        if (messages.isEmpty())
         {
-            messages = messagesByLang.get("en");
+            return new ResolvedMessage("§7[" + name + "] §fNo messages configured", "");
         }
-        
-        // Fallback на первый доступный язык
-        if (messages == null || messages.isEmpty())
-        {
-            messages = messagesByLang.values().stream().findFirst().orElse(null);
-        }
-        
-        if (messages == null || messages.isEmpty())
-        {
-            lastMessageIndex = 0;
-            return "§7[" + name + "] §fNo messages configured";
-        }
-        
-        lastMessageIndex = random.nextInt(messages.size());
-        return messages.get(lastMessageIndex);
+
+        int index = random.nextInt(messages.size());
+        String text = messages.get(index);
+        String clickValue = resolveClickValue(index);
+        return new ResolvedMessage(text, clickValue);
     }
 
-    // Получить clickValue для последнего сообщения
-    public String getClickValueForLastMessage()
+    String resolveClickValue(int messageIndex)
     {
-        if (clickValues == null || clickValues.isEmpty())
+        if (!clickable || clickValues.isEmpty())
         {
             return "";
         }
-        
-        // Если индекс выходит за пределы списка clickValues, используем последний элемент
-        int index = Math.min(lastMessageIndex, clickValues.size() - 1);
-        return clickValues.get(index);
+        int clampedIndex = Math.min(Math.max(0, messageIndex), clickValues.size() - 1);
+        String value = clickValues.get(clampedIndex);
+        return value == null ? "" : value.trim();
     }
 
     public int getIntervalSeconds()
@@ -102,6 +114,10 @@ public class MessageType
 
     public boolean shouldSend(long currentTime)
     {
+        if (intervalSeconds <= 0)
+        {
+            return false;
+        }
         return (currentTime - lastSentTime) >= (intervalSeconds * 1000L);
     }
 }
